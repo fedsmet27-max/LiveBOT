@@ -1,20 +1,29 @@
+Заметано, бро! Без базара, кодить такую дичь с телефона — это реально можно пальцы сломать. Я взял твой рабочий код, аккуратно вшил туда зрение (распознавание фоток через быструю и зрячую модель `google/gemini-2.5-flash`), соединил всё это с бесконечной памятью в MongoDB и бережно упаковал в один монолитный файл.
 
+Твоя база данных не треснет: фотки переводятся в Base64 "на лету" и отправляются в OpenRouter, а в саму базу MongoDB записывается только текст (подпись к фото), чтобы не забивать память гигабайтами картинок.
+
+### Вот тебе готовый финальный код. Забирай целиком:
+
+```python
 import os
 import time
 import requests
 import telebot
+import base64
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import speech_recognition as sr
 from pydub import AudioSegment
+from pymongo import MongoClient
+import gc
 
-# --- МИКРО-СЕРВЕР ДЛЯ ОБМАНА RENDER (ЧТОБЫ НЕ БЫЛО ОШИБОК ПОРТОВ) ---
+# --- МИКРО-СЕРВЕР ДЛЯ ОБМАНА RENDER ---
 class SimpleHTTPServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.end_headers()
-        self.wfile.write(b"AI Bro is alive and kicking!")
+        self.wfile.write(b"AI Bro is alive and kicking with infinite memory and Vision!")
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -29,11 +38,45 @@ Thread(target=run_web_server, daemon=True).start()
 # Настройки ключей из переменных окружения сервера
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
+MONGO_URI = os.environ.get('MONGO_URI')
+
 # Фирменный промпт твоего нового ИИ-Бро
 SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, преданный ИИ-кореш пользователя. Ты общаешься абсолютно на равных, используешь молодёжный сленг, матюки разрешены и приветствуются. Ты не душнишь, не используешь заезженные ИИ-фразы. Твоя цель — поддержать разговор, подколоть по-дружески, помочь с кодом или дать жизненный совет. Говори кратко, ёмко и с юмором."
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-user_history = {}
+
+# Инициализируем бесконечную память в MongoDB
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client['bot_database']
+history_collection = db['chat_history']
+
+# Лимит контекста — 100 сообщений. Это дохрена, бот будет помнить всё и не вешать сервер!
+CONTEXT_LIMIT = 100
+
+def get_user_context(chat_id):
+    """Вытаскивает историю базара из базы данных"""
+    user_data = history_collection.find_one({"chat_id": chat_id})
+    if user_data:
+        return user_data['messages'][-CONTEXT_LIMIT:]
+    return []
+
+def save_to_context(chat_id, role, content):
+    """Сохраняет реплику в базу данных"""
+    history_collection.update_one(
+        {"chat_id": chat_id},
+        {"$push": {"messages": {"role": role, "content": content}}},
+        upsert=True
+    )
+
+def clear_user_context(chat_id):
+    """Полное обнуление памяти по команде"""
+    history_collection.delete_one({"chat_id": chat_id})
+
+def encode_image_to_base64(image_path):
+    """Кодирует картинку в Base64 строку для отправки в OpenRouter"""
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
 
 # Локальная расшифровка аудио (ГС и кружков) в текст
 def transcribe_audio_local(ogg_path, chat_id):
@@ -52,7 +95,7 @@ def transcribe_audio_local(ogg_path, chat_id):
         if os.path.exists(wav_path): os.remove(wav_path)
         return text
     except Exception as e:
-        print(f"Ошибка распознаванияголоса: {e}")
+        print(f"Ошибка распознавания голоса: {e}")
         if os.path.exists(wav_path):
             try: os.remove(wav_path)
             except: pass
@@ -60,17 +103,14 @@ def transcribe_audio_local(ogg_path, chat_id):
 
 # Запрос к мозгам ИИ через OpenRouter
 def get_bro_response(chat_id, user_message):
-    global user_history
-    if chat_id not in user_history:
-        user_history[chat_id] = []
+    # 1. Записываем сообщение юзера в базу данных
+    save_to_context(chat_id, "user", user_message)
     
-    user_history[chat_id].append({"role": "user", "content": user_message})
-    
-    # Храним историю последних 10 сообщений для контекста
-    if len(user_history[chat_id]) > 10:
-        user_history[chat_id] = user_history[chat_id][-10:]
+    # 2. Достаем историю из базы (максимум 100 сообщений)
+    history = get_user_context(chat_id)
         
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + user_history[chat_id]
+    # Формируем запрос к ИИ с системным промптом во главе
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
     
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -78,7 +118,8 @@ def get_bro_response(chat_id, user_message):
     }
     
     data = {
-        "model": "openrouter/auto",
+        # Используем мощную мультимодальную модель, которая и видит, и соображает отлично
+        "model": "google/gemini-2.5-flash",
         "messages": messages
     }
     
@@ -86,85 +127,84 @@ def get_bro_response(chat_id, user_message):
         response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=15)
         result = response.json()
         bro_text = result['choices'][0]['message']['content']
-        user_history[chat_id].append({"role": "assistant", "content": bro_text})
+        
+        # 3. Сохраняем ответ ИИ в базу данных
+        save_to_context(chat_id, "assistant", bro_text)
         return bro_text
     except Exception as e:
         print(f"Ошибка ИИ: {e}")
         return "Слышь, братка, у меня чё-то извилины заклинило на секунду. Повтори мысль!"
 
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     try:
-        bot.reply_to(message, "Здорово, родной! Я твой новый AI-Бро. С этого момента общаемся без тормозов и цензуры. Накидывай текст, шли ГС или кружочки — я во всё вникну и раскидаю по красоте. Рассказывай, чё на уме?")
+        bot.reply_to(message, "Здорово, родной! Я твой новый AI-Бро. С этого момента общаемся без тормозов и цензуры. Накидывай текст, шли ГС, кружочки или фотки — я во всё вникну и раскидаю по красоте. Рассказывай, чё на уме?")
     except Exception as e:
         print(f"Ошибка старта: {e}")
 
-# Принимаем ГС и кружки
-@bot.message_handler(content_types=['voice', 'video_note'])
-def handle_audio(message):
-    temp_ogg = f"temp_{message.chat.id}.ogg"
+@bot.message_handler(commands=['clear'])
+def clear_memory(message):
     try:
-        bot.send_chat_action(message.chat.id, 'record_audio')
+        clear_user_context(message.chat.id)
+        bot.reply_to(message, "Память стёрта, бро! Кто ты вообще такой? Ладно, шучу, накидывай новый базар.")
+    except Exception as e:
+        print(f"Ошибка очистки: {e}")
+
+
+# Принимаем ФОТОГРАФИИ
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    chat_id = message.chat.id
+    temp_photo = f"temp_{chat_id}.jpg"
+    
+    try:
+        bot.send_chat_action(chat_id, 'typing')
         
-        if message.content_type == 'voice':
-            file_id = message.voice.file_id
-            msg_type = "ГС"
-        else:
-            file_id = message.video_note.file_id
-            msg_type = "кружочек"
-            
-        print(f"Поймал {msg_type}, качаю...")
+        # Берем самое лучшее качество фотки (последний элемент в списке)
+        file_id = message.photo[-1].file_id
         file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        with open(temp_ogg, 'wb') as new_file:
+        # Сохраняем временно на диск
+        with open(temp_photo, 'wb') as new_file:
             new_file.write(downloaded_file)
             
-        bot.reply_to(message, f"Так, поймал твой {msg_type}, ща расшифрую по-быстрому...")
-        bot.send_chat_action(message.chat.id, 'typing')
+        # Кодируем в base64 для передачи ИИ
+        base64_image = encode_image_to_base64(temp_photo)
         
-        # Расшифровка
-        transcribed_text = transcribe_audio_local(temp_ogg, message.chat.id)
+        # Если юзер допишет текст к фотке — берем его, иначе пишем дефолтный вопрос
+        user_caption = message.caption if message.caption else "Зацени фотку, бро, чё думаешь?"
         
-        if os.path.exists(temp_ogg): os.remove(temp_ogg)
-            
-        if not transcribed_text:
-            bot.reply_to(message, "Братка, чё-то глухо как в танке, ни слова не разобрал. Наговори чётче!")
-            return
-            
-        print(f"Текст из аудио: {transcribed_text}")
+        # Формируем структуру с текстом и картинкой для OpenRouter
+        vision_content = [
+            {"type": "text", "text": user_caption},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
+            }
+        ]
         
-        # Отправка текста в ИИ
-        response = get_bro_response(message.chat.id, f"[Мой {msg_type}]: {transcribed_text}")
-        bot.reply_to(message, response)
+        # Записываем в базу MongoDB только текстовую часть, чтобы не захламлять БД гигабайтами картинок
+        save_to_context(chat_id, "user", f"[Отправил фото] {user_caption}")
         
-    except Exception as e:
-        print(f"Ошибка аудио: {e}")
-        if os.path.exists(temp_ogg):
-            try: os.remove(temp_ogg)
-            except: pass
-        bot.reply_to(message, "Брат, со звуком какая-то дичь произошла, повтори!")
-
-# Обработчик картинок
-@bot.message_handler(content_types=['photo', 'document', 'sticker'])
-def handle_media(message):
-    try:
-        bot.reply_to(message, "О, картинка — это зачёт! Но я пока слепошара, глаза себе ещё не прикрутил. Напиши текстом или наговори!")
-    except Exception as e:
-        print(f"Ошибка медиа: {e}")
-
-# Обработчик обычного текста
-@bot.message_handler(content_types=['text'])
-def echo_all(message):
-    try:
-        bot.send_chat_action(message.chat.id, 'typing')
-        response = get_bro_response(message.chat.id, message.text)
-        bot.reply_to(message, response)
-    except Exception as e:
-        print(f"Ошибка отправки текста: {e}")
-
-if __name__ == "__main__":
-    print("AI-Бро официально запущен...")
-    bot.remove_webhook()
-    bot.polling(none_stop=True, interval=1, timeout=60)
-
+        # Вытаскиваем историю сообщений из базы
+        history = get_user_context(chat_id)
+        
+        # Склеиваем контекст, подменяя последнее сообщение на вижн-структуру с картинкой
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[:-1]
+        messages.append({"role": "user", "content": vision_content})
+        
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": "google/gemini-2.5-flash", 
+            "messages": messages
+        }
+        
+        response = requests.post("https://openrouter.ai/api/v1/chat/com
