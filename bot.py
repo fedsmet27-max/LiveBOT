@@ -94,7 +94,13 @@ def ask_gemini(chat_id, text_query, b64_img=None):
     else:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
-    data = {"model": "google/gemini-2.5-flash", "messages": messages}
+    data = {
+        "model": "google/gemini-2.5-flash", 
+        "messages": messages,
+        "max_tokens": 1000  # <--- Вот эта спасительная строчка!
+    }
+```
+
     
     try:
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=40).json()
