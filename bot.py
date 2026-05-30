@@ -79,13 +79,11 @@ async def download_media_async(file_id, chat_id, is_video=False):
         downloaded_file = await bot.download_file(file_info.file_path)
         with open(ogg_path, 'wb') as f: 
             f.write(downloaded_file)
-        
         audio = AudioSegment.from_file(ogg_path, format="mp4" if is_video else "ogg")
         audio.export(wav_path, format="wav")
         r = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             text = r.recognize_google(r.record(source), language="ru-RU")
-            
         if is_video:
             cap = cv2.VideoCapture(ogg_path)
             success, frame = cap.read()
@@ -97,7 +95,8 @@ async def download_media_async(file_id, chat_id, is_video=False):
     except Exception as e: 
         print(f"Медиа ошибка: {e}")
     finally:
-        for p in [ogg_path, wav_path, img_path]:if os.path.exists(p): 
+        for p in [ogg_path, wav_path, img_path]:
+            if os.path.exists(p): 
                 os.remove(p)
         gc.collect()
     return text, b64_img
@@ -105,22 +104,16 @@ async def download_media_async(file_id, chat_id, is_video=False):
 async def ask_gemini_async(chat_id, text_query, b64_img=None):
     if not text_query and not b64_img:
         return "Ты че молчишь, родной? Напиши че-нибудь!"
-        
     if text_query and not b64_img:
         await save_mem_async(chat_id, "user", text_query)
-
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда помни, что сейчас 2026 год!]"
-    
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда помни, что сейчас 2026 год!]"
     history = await get_mem_async(chat_id)
-    
     headers = {
         "Authorization": f"Bearer {API_KEY}", 
         "Content-Type": "application/json",
         "HTTP-Referer": "https://render.com",
         "X-Title": "AI Bro Bot"
     }
-    
     if b64_img:
         user_content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]
         if text_query:
@@ -130,22 +123,18 @@ async def ask_gemini_async(chat_id, text_query, b64_img=None):
         messages = [{"role": "system", "content": live_prompt}] + history + [{"role": "user", "content": user_content}]
     else:
         messages = [{"role": "system", "content": live_prompt}] + history
-
     data = {
         "model": "google/gemini-2.5-flash", 
         "messages": messages, 
         "max_tokens": 1000
     }
-    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30) as response:
                 res_json = await response.json()
-                
                 if 'choices' not in res_json:
                     print(f"Косяк OpenRouter: {res_json}")
                     return "Бля, у меня сервак лагает. Повтори вопрос."
-                    
                 ans = res_json['choices'][0]['message']['content']
                 if text_query and not b64_img:
                     await save_mem_async(chat_id, "assistant", ans)
@@ -179,7 +168,7 @@ async def handle_video_note(message):
 @bot.message_handler(content_types=['text'])
 async def handle_text(message):
     await bot.send_chat_action(message.chat.id, 'typing')
-    reply = await ask_gemini_async(message.chat.id, message.text)
+    reply = await ask_gemini_async(message.chat.id,message.text)
     await bot.reply_to(message, reply)
 
 async def main():
@@ -191,7 +180,6 @@ async def main():
         await asyncio.sleep(2)
     except Exception as e:
         print(f"Сброс сессии: {e}")
-    
     print("Супер-Бот погнал!...")
     await bot.infinity_polling(
         timeout=30,
