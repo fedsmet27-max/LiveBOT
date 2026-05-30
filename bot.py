@@ -156,8 +156,7 @@ def handle_photo(m):
         
 
     except Exception as e: print(f"Ошибка вебхука: {e}")
-    print("Бот погнал!...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)if __name__ == "__main__":
+
     print("Сносим все старые коннекты в Телеге...")
     try:
         # Удаляем вебхук принудительно
@@ -166,8 +165,8 @@ def handle_photo(m):
     except Exception as e: 
         print(f"Ошибка сброса вебхука: {e}")
         
-    if __name__ == "__main__":
-       bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)
+
+
 
     print("Супер-Бот погнал!...")
     # Тут добавлен allowed_updates=[] — он заставляет Телеграм сбросить ВСЕ старые запросы обновлений
