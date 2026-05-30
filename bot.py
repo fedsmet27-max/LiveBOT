@@ -202,4 +202,10 @@ def handle_text(message):
         bro_response = get_bro_response(chat_id, user_text)
         bot.reply_to(message, bro_response)
     except Exception as e:
-        print(
+        print(f"Ошибка текста: {e}")
+    finally:
+        gc.collect()
+
+if __name__ == '__main__':
+    bot.infinity_polling()
+
