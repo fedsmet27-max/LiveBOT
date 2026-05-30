@@ -40,21 +40,10 @@ SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, п
 
 
 # Инициализируем бесконечную память в MongoDB (ЖЕСТКИЙ обход SSL ошибок)
-   try:
-       mongo_client = MongoClient(
-           MONGO_URI,
-           tls=True,
-           tlsAllowInvalidCertificates=True
-       )
-   except Exception:
-       # Если первый способ не прокатил — ебашим через кастомный SSL-контекст
-       mongo_client = MongoClient(
-           MONGO_URI,
-           ssl_cert_reqs=ssl.CERT_NONE
-       )
+mongo_client = MongoClient(MONGO_URI, ssl=True, ssl_cert_reqs='CERT_NONE')
+db = mongo_client['bot_database']
+history_collection = db['chat_history']
 
-   db = mongo_client['bot_database']
-   history_collection = db['chat_history']
 
 # Лимит контекста — 100 сообщений.
 CONTEXT_LIMIT = 100
