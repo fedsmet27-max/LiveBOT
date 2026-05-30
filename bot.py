@@ -1,4 +1,4 @@
-import os, requests, telebot, base64, json, gc
+import os, requests, telebot, base64, json, gc, time
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import speech_recognition as sr
@@ -19,7 +19,7 @@ BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
 SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, преданный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко."
 DB_FILE = "chat_history.json"
-LIMIT = 50 # Храним последние 50 сообщений, чтоб контекст не разрывало
+LIMIT = 50 # Храним последние 50 сообщений
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
@@ -77,7 +77,7 @@ def transcribe_audio(file_id, chat_id, is_video=False):
             if os.path.exists(p): os.remove(p)
         gc.collect()
 
-# --- ЗАПРОС К OPENROUTER (С УЧЕТОМ ПАМЯТИ) ---
+# --- ЗАПРОС К OPENROUTER (ТУТ ВСЁ ИСПРАВЛЕНО) ---
 def ask_gemini(chat_id, text_query, b64_img=None):
     if text_query and not b64_img:
         save_mem(chat_id, "user", text_query)
@@ -85,31 +85,28 @@ def ask_gemini(chat_id, text_query, b64_img=None):
     history = get_mem(chat_id)
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     
-    # Формируем текущее сообщение (с картинкой или без)
     if b64_img:
         user_content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]
         if text_query: user_content.append({"type": "text", "text": text_query})
-        # Картинки в историю чата не пишем (они слишкомжирные для JSON), отправляем разово
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_content}]
     else:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
+    # ТУТ ДОБАВЛЕН max_tokens ЧТОБЫ ИЗБЕЖАТЬ ОШИБКИ 402!
     data = {
         "model": "google/gemini-2.5-flash", 
         "messages": messages,
-        "max_tokens": 1000  # <--- Вот эта спасительная строчка!
+        "max_tokens": 1000
     }
-```
-
     
     try:
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=40).json()
         if 'choices' in res:
             reply = res['choices'][0]['message']['content']
-            if not b64_img: # Историю переписки без картинок пишем в память
+            if not b64_img:
                 save_mem(chat_id, "assistant", reply)
             return reply
-        print(f"Ошибка OpenRouter: {res}"); return "Бро, какая-то лажа с ключами или балансом на OpenRouter..."
+        print(f"Ошибка OpenRouter: {res}"); return "Братан, у меня на сервере какая-то залупа, проверь баланс на OpenRouter!"
     except Exception as e:
         print(f"Ошибка ИИ: {e}"); return "Бля, бро, че-то у меня мозги набекрень съехали..."
 
@@ -138,7 +135,7 @@ def handle_audio(m):
     text = transcribe_audio(file_id, m.chat.id, is_video)
     
     if not text:
-        bot.reply_to(m, "Бля, не разобрал ни слова. Попробуй сказать четче.")
+        bot.reply_to(m, "Бля, не разобрал ни слова. Попробуй сказать чётче.")
         return
         
     bot.reply_to(m, f"Ты сказал: \"{text}\"\n\nДумаю...")
@@ -157,18 +154,14 @@ def handle_photo(m):
     except Exception as e:
         print(f"Ошибка фото: {e}")
         bot.reply_to(m, "Не смог открыть картинку, бро. Че-то пошло не так.")
+
 if __name__ == "__main__":
     print("Выметаем старых зомби из Телеги...")
     try:
-        # Принудительно удаляем вебхук и чистим зависшие апдейты
         bot.remove_webhook()
-        # Даем Телеге 2 секунды раздуплиться
         time.sleep(2) 
     except Exception as e:
         print(f"Не удалось сбросить вебхук: {e}")
 
     print("Супер-Бот успешно запущен на чистом соединении!...")
-    # Запускаем поллинг, заставляя Телегу забыть про старые запросы (skip_pending=True)
     bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)
-
-  
