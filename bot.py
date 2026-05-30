@@ -151,7 +151,18 @@ def handle_photo(m):
     except Exception as e:
         print(f"Ошибка фото: {e}")
         bot.reply_to(m, "Не смог открыть картинку, бро. Че-то пошло не так.")
-
 if __name__ == "__main__":
-    print("Супер-Бот запущен...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    print("Выметаем старых зомби из Телеги...")
+    try:
+        # Принудительно удаляем вебхук и чистим зависшие апдейты
+        bot.remove_webhook()
+        # Даем Телеге 2 секунды раздуплиться
+        time.sleep(2) 
+    except Exception as e:
+        print(f"Не удалось сбросить вебхук: {e}")
+
+    print("Супер-Бот успешно запущен на чистом соединении!...")
+    # Запускаем поллинг, заставляя Телегу забыть про старые запросы (skip_pending=True)
+    bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)
+
+  
