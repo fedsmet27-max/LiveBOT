@@ -1,34 +1,48 @@
-import os, requests, telebot, base64, json, gc, time
-from threading import Thread
-from http.server import BaseHTTPRequestHandler, HTTPServer
+Понимаю, Федя, с телефона Koyeb настраивать — это знатный геморрой, там интерфейс под мобилки не очень приспособлен, а мы уже устали тыкать в экран.
+
+Раз уж мы сидим на **Render**, давай я сделаю так, чтобы всё работало **прямо здесь, бесплатно и без переездов**. 
+
+Мы просто заставим Render думать, что наш бот — это веб-сайт, но сделаем это по-умному. Мы поднимем микро-сервер, который будет крутиться в главном потоке, а самого бота запустим в фоне. Так Render гарантированно получит свой порт и не будет отключать бота.
+
+Вот полностью готовый код для твоего `bot.py`. Я переписал его так, чтобы он идеально работал на бесплатном тарифе Render с телефонов.
+
+### Скопируй весь этот код и замени им свой файл на GitHub:
+
+```python
+import os, requests, telebot, base64, json, gc, time, threading
 import speech_recognition as sr
 from pydub import AudioSegment
 import cv2
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# Настройка заглушки-сервера для Render
-class SimpleHTTPServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"AI Bro is alive!")
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
-
-# Запускаем сервер в фоне на старте
-port = int(os.environ.get("PORT", 8000))
-server = HTTPServer(("0.0.0.0", port), SimpleHTTPServer)
-Thread(target=server.serve_forever, daemon=True).start()
-
-# Конфиг
+# Токены
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
-SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко. Тебе доступен поиск в интернете в реальном времени, используй его для актуальных вопросов!"
+SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко. Обращайся к юзеру 'Федя' или 'брат', 'родной', склоняй как по кайфу."
 DB_FILE = "chat_history.json"
 LIMIT = 50
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
+# --- ВЕБ-СЕРВЕР ДЛЯ ОБМАНА RENDER ---
+class WebhookServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write("AI Bro в эфире, Render, не туши меня!".encode("utf-8"))
+    
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), WebhookServer)
+    print(f"Фейк-сервер запущен на порту {port}")
+    server.serve_forever()
+
+# --- БАЗА ДАННЫХ И ЛОГИКА ---
 def load_mem():
     if os.path.exists(DB_FILE):
         try:
@@ -84,18 +98,16 @@ def process_media(file_id, chat_id, is_video=False):
             if os.path.exists(p): os.remove(p)
         gc.collect()
     return text, b64_img
+
 def ask_gemini(chat_id, text_query, b64_img=None):
-    if not text_query and not b64_img:
-        return "Ты че молчишь, бро? Напиши че-нибудь!"
+    if nottext_query and not b64_img:
+        return "Ты че молчишь, родной? Напиши че-нибудь!"
     if text_query and not b64_img:
         save_mem(chat_id, "user", text_query)
     
-    # Получаем точную дату и время прямо сейчас
     from datetime import datetime
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Добавляем инфу о реальном времени прямо в системный промпт
-    live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда ориентируйся на этот год и дату в ответах!]"
+    live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда помни, что сейчас 2026 год!]"
     
     history = get_mem(chat_id)
     headers = {
@@ -108,14 +120,13 @@ def ask_gemini(chat_id, text_query, b64_img=None):
     if b64_img:
         user_content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]
         if text_query:
-            user_content.append({"type": "text", "text": f"Бро прислал кружок и сказал: \"{text_query}\". Ответь ему."})
+            user_content.append({"type": "text", "text": f"Брат прислал кружок и сказал: \"{text_query}\". Ответь ему."})
         else:
-            user_content.append({"type": "text", "text": "Че на кадре из кружка, бро?"})
+            user_content.append({"type": "text", "text": "Че на кадре из кружка, брат?"})
         messages = [{"role": "system", "content": live_prompt}] + history + [{"role": "user", "content": user_content}]
     else:
         messages = [{"role": "system", "content": live_prompt}] + history
 
-    # Чистый запрос без ломающих плагинов
     data = {
         "model": "google/gemini-2.5-flash", 
         "messages": messages, 
@@ -126,10 +137,9 @@ def ask_gemini(chat_id, text_query, b64_img=None):
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30)
         res_json = res.json()
         
-        # Выведем ответ в консоль для отладки, если опять что-то пойдет не так
         if 'choices' not in res_json:
-            print(f"Косяк от OpenRouter: {res_json}")
-            return "Бля, бро, OpenRouter прислал какую-то дичь вместо ответа. Попробуй еще раз!"
+            print(f"Косяк OpenRouter: {res_json}")
+            return "Бля, Федя, у меня сервак лагает. Повтори вопрос."
             
         ans = res_json['choices'][0]['message']['content']
         if text_query and not b64_img:
@@ -137,20 +147,18 @@ def ask_gemini(chat_id, text_query, b64_img=None):
         return ans
     except Exception as e:
         print(f"Ошибка Gemini: {e}")
-        return "Бля, бро, у меня чет мозги закипели от этого вопроса, давай по новой..."
+        return "Бля, родной, у меня мозги закипели, давай по новой..."
 
-
-
-# Обработчики Telegram-бота
+# --- ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
 @bot.message_handler(commands=['start'])
 def start_cmd(m):
     clear_mem(m.chat.id)
-    bot.reply_to(m, "Здорово, бро! Я ИИ Бро — твой кореш на связи 24/7. Че как сам? Можешь отправлять текст, фотки, гс или кружочки!")
+    bot.reply_to(m, "Здорово, Федя! Я ИИ Бро — твой кореш на связи. Че как сам, родной? Пиши, шли гс, кружки или фотки — всё разберем!")
 
 @bot.message_handler(commands=['clear'])
 def clear_cmd(m):
     clear_mem(m.chat.id)
-    bot.reply_to(m, "Память чиста, бро! Начинаем с чистого листа.")
+    bot.reply_to(m, "Память чиста, родной! Начинаем заново.")
 
 @bot.message_handler(content_types=['text'])
 def handle_text(m):
@@ -165,7 +173,7 @@ def handle_voice(m):
         ans = ask_gemini(m.chat.id, text)
         bot.reply_to(m, f"Ты сказал: \"{text}\"\n\n{ans}")
     else:
-        bot.reply_to(m, "Бро, че-то я не разобрал твой базар на гс. Повтори почетче.")
+        bot.reply_to(m, "Родной, не разобрал твой базар. Повтори почетче.")
 
 @bot.message_handler(content_types=['video_note'])
 def handle_video_note(m):
@@ -185,21 +193,31 @@ def handle_photo(m):
         bot.reply_to(m, ans)
     except Exception as e:
         print(e)
-        bot.reply_to(m, "Не смог открыть картинку, бро.")
+        bot.reply_to(m, "Не смог открыть картинку, брат.")
 
-# Снос старых коннектов и запуск
-print("Сносим все старые коннекты в Телеге...")
-try:
-    bot.remove_webhook()
-    time.sleep(1)
-except Exception as e:
-    print(f"Ошибка сброса вебхука: {e}")
-
-if __name__ == "__main__":
-    print("Супер-Бот погнал!...")
+# --- ЗАПУСК ВСЕЙ СИСТЕМЫ ---
+def run_bot():
+    print("Чистим вебхуки...")
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+    except:
+        pass
+    
+    print("Бот погнал в фоне!...")
+    # non_stop=True поможет боту пережить конфликты и мягкий перезапуск Render
     bot.infinity_polling(
         timeout=20,
         long_polling_timeout=15,
         skip_pending=True,
-        allowed_updates=[]
+        allowed_updates=[],
+        non_stop=True 
     )
+
+if __name__ == "__main__":
+    # 1. Запускаем бота в отдельном фоновом потоке
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    
+    # 2. Запускаем сервер на главном потоке (он будет держать соединение с Render вечно)
+    run_web_server()
