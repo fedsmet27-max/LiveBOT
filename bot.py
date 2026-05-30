@@ -130,7 +130,7 @@ def get_bro_response(chat_id, user_message):
         return bro_text
     except Exception as e:
         print(f"Ошибка ИИ: {e}")
-        return "Слышь, братка, у меня чё-то извилины заклинило. Повтори мысль!"
+        return "оаоаооаоа коины кончились!"
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
