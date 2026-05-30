@@ -153,6 +153,7 @@ def handle_photo(m):
         b64_img = base64.b64encode(img_data).decode('utf-8')
         bot.reply_to(m, ask_gemini(m.chat.id, m.caption if m.caption else "", b64_img))
     except: bot.reply_to(m, "Не смог открыть картинку, бро.")
+        
 if __name__ == "__main__":
     print("Чистим вебхуки...")
     try:
