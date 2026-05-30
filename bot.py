@@ -1,190 +1,157 @@
-
-import os
-import time
-import json
-import requests
-import telebot
-import base64
+import os, requests, telebot, base64, json, gc
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import speech_recognition as sr
 from pydub import AudioSegment
-import gc
 
-# --- МИКРО-СЕРВЕР ДЛЯ ОБМАНА RENDER (С ПОДДЕРЖКОЙ HEAD) ---
+# --- МИКРО-СЕРВЕР ---
 class SimpleHTTPServer(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"AI Bro is alive with local file memory!")
-
+        self.send_response(200); self.end_headers()
+        self.wfile.write(b"AI Bro is fully armed with memory!")
     def do_HEAD(self):
-        # Чтобы Render не ругался ошибкой 501
-        self.send_response(200)
-        self.end_headers()
+        self.send_response(200); self.end_headers()
 
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000)) # Порт 10000 по умолчанию для Рендера
-    server = HTTPServer(("0.0.0.0", port), SimpleHTTPServer)
-    print(f"Старт микро-сервера на порту {port}...")
-    server.serve_forever()
+Thread(target=lambda: HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), SimpleHTTPServer).serve_forever(), daemon=True).start()
 
-Thread(target=run_web_server, daemon=True).start()
-# -------------------------------------------------------------------
-
+# --- НАСТРОЙКИ ---
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
-
-SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, преданный ИИ-кореш пользователя. Ты общаешься абсолютно на равных, используешь молодёжный сленг, матюки приветствуются. Говори кратко, ёмко и с юмором."
+SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, преданный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко."
+DB_FILE = "chat_history.json"
+LIMIT = 50 # Храним последние 50 сообщений, чтоб контекст не разрывало
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-# Файл для локального хранения бесконечной памяти
-DB_FILE = "chat_history.json"
-CONTEXT_LIMIT = 100
-
-def load_all_history():
-    """Загружает всю историю из файла"""
+# --- БЕСКОНЕЧНАЯ ЛОКАЛЬНАЯ ПАМЯТЬ ---
+def load_mem():
     if os.path.exists(DB_FILE):
         try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
+            with open(DB_FILE, "r", encoding="utf-8") as f: return json.load(f)
+        except: return {}
     return {}
 
-def save_all_history(data):
-    """Сохраняет всю историю в файл"""
+def save_mem(chat_id, role, content):
+    data = load_mem()
+    cid = str(chat_id)
+    if cid not in data: data[cid] = []
+    data[cid].append({"role": role, "content": content})
+    data[cid] = data[cid][-LIMIT:] # Обрезаем по лимиту
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"Ошибка сохранения файла истории: {e}")
+    except Exception as e: print(f"Ошибка записи памяти: {e}")
 
-def get_user_context(chat_id):
-    """Достает историю конкретного юзера"""
-    history = load_all_history()
-    chat_str = str(chat_id)
-    if chat_str in history:
-        return history[chat_str][-CONTEXT_LIMIT:]
-    return []
+def get_mem(chat_id):
+    mem = load_mem()
+    return mem.get(str(chat_id), [])[-LIMIT:]
 
-def save_to_context(chat_id, role, content):
-    """Добавляет новое сообщение в историю юзера"""
-    history = load_all_history()
-    chat_str = str(chat_id)
-    if chat_str not in history:
-        history[chat_str] = []
-    
-    history[chat_str].append({"role": role, "content": content})
-    if len(history[chat_str]) > CONTEXT_LIMIT:
-        history[chat_str] = history[chat_str][-CONTEXT_LIMIT:]
-        
-    save_all_history(history)
+def clear_mem(chat_id):
+    data = load_mem()
+    if str(chat_id) in data:
+        del data[str(chat_id)]
+        try:
+            with open(DB_FILE, "w", encoding="utf-8") as f: json.dump(data, f)
+        except: pass
 
-def clear_user_context(chat_id):
-    """Очистка памяти чата"""
-    history = load_all_history()
-    chat_str = str(chat_id)
-    if chat_str in history:
-        del history[chat_str]
-        save_all_history(history)
-
-def encode_image_to_base64(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
-
-def transcribe_audio_local(ogg_path, chat_id):
+# --- РАБОТА С ГС И КРУЖКАМИ ---
+def transcribe_audio(file_id, chat_id, is_video=False):
+    ogg_path = f"temp_{chat_id}.ogg"
     wav_path = f"temp_{chat_id}.wav"
     try:
-        audio =AudioSegment.from_file(ogg_path, format="ogg")
+        file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        with open(ogg_path, 'wb') as new_file: new_file.write(downloaded_file)
+        
+        audio = AudioSegment.from_file(ogg_path, format="mp4" if is_video else "ogg")
         audio.export(wav_path, format="wav")
+        
         r = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
-            audio_data = r.record(source)
-            text = r.recognize_google(audio_data, language="ru-RU")
-        if os.path.exists(wav_path): os.remove(wav_path)
+            text = r.recognize_google(r.record(source), language="ru-RU")
         return text
     except Exception as e:
-        print(f"Ошибка распознавания: {e}")
-        if os.path.exists(wav_path):
-            try: os.remove(wav_path)
-            except: pass
-        return ""
+        print(f"Ошибка аудио: {e}"); return ""
+    finally:
+        for p in [ogg_path, wav_path]:
+            if os.path.exists(p): os.remove(p)
+        gc.collect()
 
-# --- ИСПРАВЛЕННЫЙ ЗАПРОС К OPENROUTER ---
-def get_bro_response(chat_id, user_message):
-    save_to_context(chat_id, "user", user_message)
-    history = get_user_context(chat_id)
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+# --- ЗАПРОС К OPENROUTER (С УЧЕТОМ ПАМЯТИ) ---
+def ask_gemini(chat_id, text_query, b64_img=None):
+    if text_query and not b64_img:
+        save_mem(chat_id, "user", text_query)
     
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "google/gemini-2.5-flash",
-        "messages": messages
-    }
+    history = get_mem(chat_id)
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    
+    # Формируем текущее сообщение (с картинкой или без)
+    if b64_img:
+        user_content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]
+        if text_query: user_content.append({"type": "text", "text": text_query})
+        # Картинки в историю чата не пишем (они слишкомжирные для JSON), отправляем разово
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_content}]
+    else:
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+
+    data = {"model": "google/gemini-2.5-flash", "messages": messages}
     
     try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=30
-        )
-        
-        result = response.json()
-        
-        # Если OpenRouter вернул ошибку (закончился баланс, неверный ключ и т.д.)
-        if 'error' in result:
-            print(f"!!! ОШИБКА OPENROUTER: {result['error']}")
-            return "Братан, у меня там на сервере какая-то залупа стряслась, проверь ключи или баланс!"
-            
-        # Если нет главного ключа в ответе
-        if 'choices' not in result:
-            print(f"!!! СТРАННЫЙ ОТВЕТ СЕРВЕРА (нет choices): {result}")
-            return "Бро, нейронка прислала какую-то дичь без ответа. Глянь логи!"
-
-        # Всё ровно — забираем ответ ИИ
-        bot_reply = result['choices'][0]['message']['content']
-        save_to_context(chat_id, "assistant", bot_reply)
-        return bot_reply
-
+        res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=40).json()
+        if 'choices' in res:
+            reply = res['choices'][0]['message']['content']
+            if not b64_img: # Историю переписки без картинок пишем в память
+                save_mem(chat_id, "assistant", reply)
+            return reply
+        print(f"Ошибка OpenRouter: {res}"); return "Бро, какая-то лажа с ключами или балансом на OpenRouter..."
     except Exception as e:
-        print(f"Ошибка ИИ: {e}")
-        try:
-            print(f"Сырой ответ сервера: {response.text}")
-        except:
-            pass
-        return "Бля, бро, чё-то у меня мозги набекрень съехали..."
+        print(f"Ошибка ИИ: {e}"); return "Бля, бро, че-то у меня мозги набекрень съехали..."
 
-# --- ОБРАБОТЧИКИ ТЕЛЕГРАМ-БОТА ---
+# --- ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Здорово, бро! Я твой карманный ИИ-кореш. Пиши че как, потрещим! Напиши /clear чтобы очистить мою память.")
+def start(m):
+    bot.reply_to(m, "Здорово, бро! Я твой ИИ-кореш с бесконечной памятью. Воспринимаю текст, ГС, кружки и фотки. Чтобы стереть мне память, пиши /clear. Жги!")
 
 @bot.message_handler(commands=['clear'])
-def clear_memory(message):
-    clear_user_context(message.chat.id)
-    bot.reply_to(message, "Базару нет, бро! Всё забыл, начинаем с чистого листа. Напомни, как меня зовут? 😉")
+def clear(m):
+    clear_mem(m.chat.id)
+    bot.reply_to(m, "Базару нет, бро! Всё забыл, голова пустая. Напомни, как меня зовут? 😉")
 
 @bot.message_handler(content_types=['text'])
-def handle_text(message):
-    chat_id = message.chat.id
-    user_text = message.text
-    
-    # Отправляем статус "печатает" для красоты
-    bot.send_chat_action(chat_id, 'typing')
-    
-    # Получаем ответ от Gemini
-    reply = get_bro_response(chat_id, user_text)
-    bot.send_message(chat_id, reply)
+def handle_text(m):
+    bot.send_chat_action(m.chat.id, 'typing')
+    bot.reply_to(m, ask_gemini(m.chat.id, m.text))
 
-# --- ЗАПУСК ПОЛЛИНГА ---
+@bot.message_handler(content_types=['voice', 'video_note'])
+def handle_audio(m):
+    bot.send_chat_action(m.chat.id, 'typing')
+    is_video = m.content_type == 'video_note'
+    file_id = m.video_note.file_id if is_video else m.voice.file_id
+    
+    bot.reply_to(m, "Слушаю тебя, бро... 🎧")
+    text = transcribe_audio(file_id, m.chat.id, is_video)
+    
+    if not text:
+        bot.reply_to(m, "Бля, не разобрал ни слова. Попробуй сказать четче.")
+        return
+        
+    bot.reply_to(m, f"Ты сказал: \"{text}\"\n\nДумаю...")
+    bot.reply_to(m, ask_gemini(m.chat.id, text))
+
+@bot.message_handler(content_types=['photo'])
+def handle_photo(m):
+    bot.send_chat_action(m.chat.id, 'typing')
+    bot.reply_to(m, "Опа, зазырим че там... 👀")
+    try:
+        file_info = bot.get_file(m.photo[-1].file_id)
+        img_data = bot.download_file(file_info.file_path)
+        b64_img = base64.b64encode(img_data).decode('utf-8')
+        caption = m.caption if m.caption else ""
+        bot.reply_to(m, ask_gemini(m.chat.id, caption, b64_img))
+    except Exception as e:
+        print(f"Ошибка фото: {e}")
+        bot.reply_to(m, "Не смог открыть картинку, бро. Че-то пошло не так.")
+
 if __name__ == "__main__":
-    print("Бот LiveBOT успешно запущен...")
-    # infinity_polling более стабилен при обрывах связи
+    print("Супер-Бот запущен...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
