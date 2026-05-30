@@ -41,7 +41,7 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 # Инициализируем бесконечную память в MongoDB
 # Инициализируем бесконечную память в MongoDB (без ебли с SSL)
-   mongo_client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
+mongo_client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
 
 
 # Лимит контекста — 100 сообщений. Это дохрена, бот будет помнить всё и не вешать сервер!
