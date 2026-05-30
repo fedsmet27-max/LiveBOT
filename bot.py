@@ -201,7 +201,7 @@ def run_bot():
         long_polling_timeout=15,
         skip_pending=True,
         allowed_updates=[],
-        non_stop=True 
+
     )
 
 if __name__ == "__main__":
