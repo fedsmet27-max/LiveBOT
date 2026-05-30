@@ -84,18 +84,24 @@ def process_media(file_id, chat_id, is_video=False):
             if os.path.exists(p): os.remove(p)
         gc.collect()
     return text, b64_img
-
 def ask_gemini(chat_id, text_query, b64_img=None):
     if not text_query and not b64_img:
         return "Ты че молчишь, бро? Напиши че-нибудь!"
     if text_query and not b64_img:
         save_mem(chat_id, "user", text_query)
     
+    # Получаем точную дату и время прямо сейчас
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Добавляем инфу о реальном времени прямо в системный промпт
+    live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда ориентируйся на этот год и дату в ответах!]"
+    
     history = get_mem(chat_id)
     headers = {
         "Authorization": f"Bearer {API_KEY}", 
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://render.com", # Для OpenRouter
+        "HTTP-Referer": "https://render.com",
         "X-Title": "AI Bro Bot"
     }
     
@@ -105,21 +111,26 @@ def ask_gemini(chat_id, text_query, b64_img=None):
             user_content.append({"type": "text", "text": f"Бро прислал кружок и сказал: \"{text_query}\". Ответь ему."})
         else:
             user_content.append({"type": "text", "text": "Че на кадре из кружка, бро?"})
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_content}]
+        messages = [{"role": "system", "content": live_prompt}] + history + [{"role": "user", "content": user_content}]
     else:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+        messages = [{"role": "system", "content": live_prompt}] + history
 
-    # Добавляем плагин web-search от OpenRouter, чтобы модель гуглила инфу на лету!
+    # Чистый запрос без ломающих плагинов
     data = {
         "model": "google/gemini-2.5-flash", 
         "messages": messages, 
-        "max_tokens": 1000,
-        "plugins": [{"id": "web-search"}] # Фича для поиска в реальном времени через OpenRouter
+        "max_tokens": 1000
     }
     
     try:
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30)
         res_json = res.json()
+        
+        # Выведем ответ в консоль для отладки, если опять что-то пойдет не так
+        if 'choices' not in res_json:
+            print(f"Косяк от OpenRouter: {res_json}")
+            return "Бля, бро, OpenRouter прислал какую-то дичь вместо ответа. Попробуй еще раз!"
+            
         ans = res_json['choices'][0]['message']['content']
         if text_query and not b64_img:
             save_mem(chat_id, "assistant", ans)
@@ -127,6 +138,8 @@ def ask_gemini(chat_id, text_query, b64_img=None):
     except Exception as e:
         print(f"Ошибка Gemini: {e}")
         return "Бля, бро, у меня чет мозги закипели от этого вопроса, давай по новой..."
+
+
 
 # Обработчики Telegram-бота
 @bot.message_handler(commands=['start'])
