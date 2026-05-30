@@ -98,7 +98,8 @@ def get_bro_response(chat_id, user_message):
         response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=15)
         result = response.json()
         bro_text = result['choices'][0]['message']['content']
-        save_to_context(chat_id, "assistant", bro_text)return bro_text
+        save_to_context(chat_id, "assistant", bro_text)
+        return bro_text
     except Exception as e:
         print(f"Ошибка ИИ: {e}")
         return "Слышь, братка, у меня чё-то извилины заклинило. Повтори мысль!"
