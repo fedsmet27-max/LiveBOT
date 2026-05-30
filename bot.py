@@ -40,9 +40,9 @@ SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, п
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 # Инициализируем бесконечную память в MongoDB
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client['bot_database']
-history_collection = db['chat_history']
+# Инициализируем бесконечную память в MongoDB (без ебли с SSL)
+   mongo_client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
+
 
 # Лимит контекста — 100 сообщений. Это дохрена, бот будет помнить всё и не вешать сервер!
 CONTEXT_LIMIT = 100
