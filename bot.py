@@ -165,6 +165,7 @@ def handle_photo(m):
         time.sleep(1)
     except Exception as e: 
         print(f"Ошибка сброса вебхука: {e}")
+        
     if __name__ == "__main__":
        bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)
 
