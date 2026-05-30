@@ -88,6 +88,10 @@ def process_media(file_id, chat_id, is_video=False):
         gc.collect()
     return text, b64_img# --- ЗАПРОС К OPENROUTER ---
 def ask_gemini(chat_id, text_query, b64_img=None):
+    # Если пришёл пустой запрос без картинки — не ебём мозги серверу ИИ
+    if not text_query and not b64_img:
+        return "Ты че молчишь, бро? Черкни хоть слово!"
+
     if text_query and not b64_img:
         save_mem(chat_id, "user", text_query)
     
@@ -132,6 +136,8 @@ def clear(m):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(m):
+    if not m.text or m.text.strip() == "":
+        return
     bot.send_chat_action(m.chat.id, 'typing')
     bot.reply_to(m, ask_gemini(m.chat.id, m.text))
 
@@ -145,12 +151,17 @@ def handle_audio(m):
     text, b64_img = process_media(file_id, m.chat.id, is_video)
     
     if is_video:
-        speech_info = f"Ты сказал: \"{text}\"\n\n" if text else ""
-        bot.reply_to(m, f"{speech_info}Анализирую кадр из кружка...")
+        # Если записал молча — не ломаем отправку
+        if text and text.strip() != "":
+            speech_info = f"Ты сказал: \"{text}\"\n\nАнализирую кадр из кружка..."
+        else:
+            speech_info = "Ты записал кружок молча.\n\nАнализирую кадр из кружка..."
+            
+        bot.reply_to(m, speech_info)
         bot.reply_to(m, ask_gemini(m.chat.id, text, b64_img))
     else:
-        if not text:
-            bot.reply_to(m, "Бля, не разобрал ни слова в ГС. Попробуй сказать чётче.")
+        if not text or text.strip() == "":
+            bot.reply_to(m, "Бля, не разобрал ни слова в ГС. Попробуй сказать чётче, бро.")
             return
         bot.reply_to(m, f"Ты сказал: \"{text}\"\n\nДумаю...")
         bot.reply_to(m, ask_gemini(m.chat.id, text))
@@ -175,7 +186,7 @@ if __name__ == "__main__":
         bot.remove_webhook()
         time.sleep(2) 
     except Exception as e:
-        print(f"Не удалось сбросить вебхук: {e}")
+        print(f"Не удалось сбросить вебхук: {e")
 
     print("Супер-Бот успешно запущен на чистом соединении!...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)
