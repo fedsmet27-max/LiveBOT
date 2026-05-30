@@ -207,4 +207,87 @@ def handle_photo(message):
             "messages": messages
         }
         
-        response = requests.post("https://openrouter.ai/api/v1/chat/com
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=20)
+        result = response.json()
+        bro_text = result['choices'][0]['message']['content']
+        
+        # Записываем ответ ИИ в базу данных
+        save_to_context(chat_id, "assistant", bro_text)
+        
+        bot.reply_to(message, bro_text)
+        
+    except Exception as e:
+        print(f"Ошибка при обработке фото: {e}")
+        bot.reply_to(message, "Бля, у меня линза запотела, не могу разглядеть, чё на фотке. Попробуй ещё раз!")
+    finally:
+        # Удаляем временную фотку и чистим оперативку
+        if os.path.exists(temp_photo):
+            try: os.remove(temp_photo)
+            except: pass
+        gc.collect()
+
+
+# Принимаем ГС и кружки
+@bot.message_handler(content_types=['voice', 'video_note'])
+def handle_audio(message):
+    chat_id = message.chat.id
+    temp_ogg = f"temp_{chat_id}.ogg"
+    
+    try:
+        bot.send_chat_action(chat_id, 'record_voice')
+        
+        if message.content_type == 'voice':
+            file_id = message.voice.file_id
+        else:
+            file_id = message.video_note.file_id
+            
+        file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        with open(temp_ogg, 'wb') as new_file:
+            new_file.write(downloaded_file)
+            
+        user_text = transcribe_audio_local(temp_ogg, chat_id)
+        
+        if os.path.exists(temp_ogg):
+            os.remove(temp_ogg)
+            
+        if not user_text:
+            bot.reply_to(message, "Бро, чё-то не разобрал ни слова. Попробуй надиктовать почётче или напиши текстом.")
+            return
+            
+        bot.reply_to(message, f"🎤 *Ты сказал:* _{user_text}_")
+        bot.send_chat_action(chat_id, 'typing')
+        bro_response = get_bro_response(chat_id, user_text)
+        bot.reply_to(message, bro_response)
+        
+    except Exception as e:
+        print(f"Ошибка в обработчике аудио: {e}")
+        bot.reply_to(message, "Бля, чё-то уши заложило, не могу твой голос разобрать. Напиши текстом, если не в падлу!")
+        if os.path.exists(temp_ogg):
+            try: os.remove(temp_ogg)
+            except: pass
+    finally:
+        gc.collect()
+
+
+# Принимаем обычный текст
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    chat_id = message.chat.id
+    user_text = message.text
+    try:
+        bot.send_chat_action(chat_id, 'typing')
+        bro_response = get_bro_response(chat_id, user_text)
+        bot.reply_to(message, bro_response)
+    except Exception as e:
+        print(f"Ошибка в обработчике текста: {e}")
+    finally:
+        gc.collect()
+
+
+# Запуск бота
+if __name__ == '__main__':
+    print("Бот стартовал с бесконечной памятью на MongoDB и поддержкой зрения!")
+    bot.infinity_polling()
+
