@@ -40,9 +40,10 @@ SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, п
 
 
 # Инициализируем бесконечную память в MongoDB (ЖЕСТКИЙ обход SSL ошибок)
-mongo_client = MongoClient(MONGO_URI, ssl=True, ssl_cert_reqs='CERT_NONE')
+mongo_client = MongoClient(MONGO_URI)
 db = mongo_client['bot_database']
 history_collection = db['chat_history']
+
 
 
 # Лимит контекста — 100 сообщений.
