@@ -90,7 +90,7 @@ def process_media(file_id, chat_id, is_video=False):
     return text, b64_img
 
 def ask_gemini(chat_id, text_query, b64_img=None):
-    if nottext_query and not b64_img:
+    if not text_query and not b64_img:
         return "Ты че молчишь, родной? Напиши че-нибудь!"
     if text_query and not b64_img:
         save_mem(chat_id, "user", text_query)
