@@ -106,7 +106,8 @@ async def ask_gemini_async(chat_id, text_query, b64_img=None):
         return "Ты че молчишь, родной? Напиши че-нибудь!"
     if text_query and not b64_img:
         await save_mem_async(chat_id, "user", text_query)
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда помни, что сейчас 2026 год!]"
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда помни, что сейчас 2026 год!]"
     history = await get_mem_async(chat_id)
     headers = {
         "Authorization": f"Bearer {API_KEY}", 
