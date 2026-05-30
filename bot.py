@@ -9,7 +9,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import speech_recognition as sr
 from pydub import AudioSegment
 from pymongo import MongoClient
-import gc
+import ssl
+
 
 # --- МИКРО-СЕРВЕР ДЛЯ ОБМАНА RENDER ---
 class SimpleHTTPServer(BaseHTTPRequestHandler):
@@ -38,14 +39,22 @@ MONGO_URI = os.environ.get('MONGO_URI')
 SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, преданный ИИ-кореш пользователя. Ты общаешься абсолютно на равных, используешь молодёжный сленг, матюки разрешены и приветствуются. Ты не душнишь, не используешь заезженные ИИ-фразы. Твоя цель — поддержать разговор, подколоть по-дружески, помочь с кодом или дать жизненный совет. Говори кратко, ёмко и с юмором."
 
 
-# Инициализируем бесконечную память в MongoDB
-# Инициализируем бесконечную память в MongoDB (без ебли с SSL)
-bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+# Инициализируем бесконечную память в MongoDB (ЖЕСТКИЙ обход SSL ошибок)
+   try:
+       mongo_client = MongoClient(
+           MONGO_URI,
+           tls=True,
+           tlsAllowInvalidCertificates=True
+       )
+   except Exception:
+       # Если первый способ не прокатил — ебашим через кастомный SSL-контекст
+       mongo_client = MongoClient(
+           MONGO_URI,
+           ssl_cert_reqs=ssl.CERT_NONE
+       )
 
-# Инициализируем бесконечную память в MongoDB (без ебли с SSL)
-mongo_client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
-db = mongo_client['bot_database']
-history_collection = db['chat_history']
+   db = mongo_client['bot_database']
+   history_collection = db['chat_history']
 
 # Лимит контекста — 100 сообщений.
 CONTEXT_LIMIT = 100
