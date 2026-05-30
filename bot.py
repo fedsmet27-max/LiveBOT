@@ -3,12 +3,13 @@ from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import speech_recognition as sr
 from pydub import AudioSegment
+import cv2  # Библиотека для выдергивания кадра из видео
 
 # --- МИКРО-СЕРВЕР ---
 class SimpleHTTPServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers()
-        self.wfile.write(b"AI Bro is fully armed with memory!")
+        self.wfile.write(b"AI Bro is fully armed with Video Vision!")
     def do_HEAD(self):
         self.send_response(200); self.end_headers()
 
@@ -19,11 +20,11 @@ BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
 SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный, преданный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко."
 DB_FILE = "chat_history.json"
-LIMIT = 50 # Храним последние 50 сообщений
+LIMIT = 50
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-# --- БЕСКОНЕЧНАЯ ЛОКАЛЬНАЯ ПАМЯТЬ ---
+# --- ПАМЯТЬ ---
 def load_mem():
     if os.path.exists(DB_FILE):
         try:
@@ -36,15 +37,14 @@ def save_mem(chat_id, role, content):
     cid = str(chat_id)
     if cid not in data: data[cid] = []
     data[cid].append({"role": role, "content": content})
-    data[cid] = data[cid][-LIMIT:] # Обрезаем по лимиту
+    data[cid] = data[cid][-LIMIT:]
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e: print(f"Ошибка записи памяти: {e}")
 
 def get_mem(chat_id):
-    mem = load_mem()
-    return mem.get(str(chat_id), [])[-LIMIT:]
+    return load_mem().get(str(chat_id), [])[-LIMIT:]
 
 def clear_mem(chat_id):
     data = load_mem()
@@ -54,30 +54,48 @@ def clear_mem(chat_id):
             with open(DB_FILE, "w", encoding="utf-8") as f: json.dump(data, f)
         except: pass
 
-# --- РАБОТА С ГС И КРУЖКАМИ ---
-def transcribe_audio(file_id, chat_id, is_video=False):
+# --- ОБРАБОТКА ГС И ВИДЕО (КРУЖКОВ) ---
+def process_media(file_id, chat_id, is_video=False):
     ogg_path = f"temp_{chat_id}.ogg"
     wav_path = f"temp_{chat_id}.wav"
+    img_path = f"temp_{chat_id}.jpg"
+    text = ""
+    b64_img = None
+    
     try:
         file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        with open(ogg_path, 'wb') as new_file: new_file.write(downloaded_file)
+        with open(ogg_path, 'wb') as new_file: 
+            new_file.write(downloaded_file)
         
+        # 1. Извлекаем аудио и распознаемв текст
         audio = AudioSegment.from_file(ogg_path, format="mp4" if is_video else "ogg")
         audio.export(wav_path, format="wav")
-        
         r = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             text = r.recognize_google(r.record(source), language="ru-RU")
-        return text
+            
+        # 2. Если это кружок, вырезаем кадр из видео
+        if is_video:
+            cap = cv2.VideoCapture(ogg_path)
+            success, frame = cap.read() # Читаем первый кадр
+            if success:
+                cv2.imwrite(img_path, frame) # Сохраняем во временный джипег
+                with open(img_path, "rb") as image_file:
+                    b64_img = base64.b64encode(image_file.read()).decode('utf-8')
+            cap.release()
+            
     except Exception as e:
-        print(f"Ошибка аудио: {e}"); return ""
+        print(f"Ошибка обработки медиа: {e}")
     finally:
-        for p in [ogg_path, wav_path]:
+        # Чистим мусор за собой
+        for p in [ogg_path, wav_path, img_path]:
             if os.path.exists(p): os.remove(p)
         gc.collect()
+        
+    return text, b64_img
 
-# --- ЗАПРОС К OPENROUTER (ТУТ ВСЁ ИСПРАВЛЕНО) ---
+# --- ЗАПРОС К OPENROUTER ---
 def ask_gemini(chat_id, text_query, b64_img=None):
     if text_query and not b64_img:
         save_mem(chat_id, "user", text_query)
@@ -87,12 +105,14 @@ def ask_gemini(chat_id, text_query, b64_img=None):
     
     if b64_img:
         user_content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]
-        if text_query: user_content.append({"type": "text", "text": text_query})
+        if text_query: 
+            user_content.append({"type": "text", "text": f"Пользователь прислал кружок и сказал: \"{text_query}\". Опиши, что видишь на кадре из его кружка и ответь на его слова."})
+        else:
+            user_content.append({"type": "text", "text": "Опиши, что на кадре из этого видео-кружка, бро?"})
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_content}]
     else:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
-    # ТУТ ДОБАВЛЕН max_tokens ЧТОБЫ ИЗБЕЖАТЬ ОШИБКИ 402!
     data = {
         "model": "google/gemini-2.5-flash", 
         "messages": messages,
@@ -106,14 +126,14 @@ def ask_gemini(chat_id, text_query, b64_img=None):
             if not b64_img:
                 save_mem(chat_id, "assistant", reply)
             return reply
-        print(f"Ошибка OpenRouter: {res}"); return "Братан, у меня на сервере какая-то залупа, проверь баланс на OpenRouter!"
+        print(f"Ошибка OpenRouter: {res}"); return "Братан, у меня на сервере какая-то залупа, проверь баланс!"
     except Exception as e:
         print(f"Ошибка ИИ: {e}"); return "Бля, бро, че-то у меня мозги набекрень съехали..."
 
 # --- ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.reply_to(m, "Здорово, бро! Я твой ИИ-кореш с бесконечной памятью. Воспринимаю текст, ГС, кружки и фотки. Чтобы стереть мне память, пиши /clear. Жги!")
+    bot.reply_to(m, "Здорово, бро! Я твой ИИ-кореш. Теперь я ВИЖУ твои кружки, фотки, слышу ГС и всё помню! Чтобы стереть мне память, пиши /clear.")
 
 @bot.message_handler(commands=['clear'])
 def clear(m):
@@ -131,15 +151,21 @@ def handle_audio(m):
     is_video = m.content_type == 'video_note'
     file_id = m.video_note.file_id if is_video else m.voice.file_id
     
-    bot.reply_to(m, "Слушаю тебя, бро... 🎧")
-    text = transcribe_audio(file_id, m.chat.id, is_video)
+    bot.reply_to(m, "Зазырим кружок... 👀" if is_video else "Слушаю тебя, бро... 🎧")
     
-    if not text:
-        bot.reply_to(m, "Бля, не разобрал ни слова. Попробуй сказать чётче.")
-        return
-        
-    bot.reply_to(m, f"Ты сказал: \"{text}\"\n\nДумаю...")
-    bot.reply_to(m, ask_gemini(m.chat.id, text))
+    text, b64_img = process_media(file_id, m.chat.id, is_video)
+    
+    if is_video:
+        # Если видос беззвучный или гугл не распознал речь
+        speech_info = f"Ты сказал: \"{text}\"\n\n" if text else ""
+        bot.reply_to(m, f"{speech_info}Анализирую кадр из кружка...")
+        bot.reply_to(m, ask_gemini(m.chat.id, text, b64_img))
+    else:
+        if not text:
+            bot.reply_to(m, "Бля, не разобрал ни слова в ГС. Попробуй сказать чётче.")
+            return
+        bot.reply_to(m, f"Ты сказал: \"{text}\"\n\nДумаю...")
+        bot.reply_to(m, ask_gemini(m.chat.id, text))
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(m):
@@ -153,7 +179,7 @@ def handle_photo(m):
         bot.reply_to(m, ask_gemini(m.chat.id, caption, b64_img))
     except Exception as e:
         print(f"Ошибка фото: {e}")
-        bot.reply_to(m, "Не смог открыть картинку, бро. Че-то пошло не так.")
+        bot.reply_to(m, "Не смог открыть картинку, бро.")
 
 if __name__ == "__main__":
     print("Выметаем старых зомби из Телеги...")
