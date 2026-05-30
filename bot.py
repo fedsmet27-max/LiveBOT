@@ -176,7 +176,8 @@ def handle_photo(message):
             "messages": messages
         }
         response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=20)
-        result = response.json()bro_text = result['choices'][0]['message']['content']
+        result = response.json()
+        bro_text = result['choices'][0]['message']['content']
         save_to_context(chat_id, "assistant", bro_text)
         bot.reply_to(message, bro_text)
     except Exception as e:
