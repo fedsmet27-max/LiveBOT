@@ -3,7 +3,7 @@ from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import speech_recognition as sr
 from pydub import AudioSegment
-import cv2  # Библиотека для выдергивания кадра из видео
+import cv2
 
 # --- МИКРО-СЕРВЕР ---
 class SimpleHTTPServer(BaseHTTPRequestHandler):
@@ -61,41 +61,32 @@ def process_media(file_id, chat_id, is_video=False):
     img_path = f"temp_{chat_id}.jpg"
     text = ""
     b64_img = None
-    
     try:
         file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        with open(ogg_path, 'wb') as new_file: 
-            new_file.write(downloaded_file)
+        with open(ogg_path, 'wb') as new_file: new_file.write(downloaded_file)
         
-        # 1. Извлекаем аудио и распознаемв текст
         audio = AudioSegment.from_file(ogg_path, format="mp4" if is_video else "ogg")
         audio.export(wav_path, format="wav")
         r = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             text = r.recognize_google(r.record(source), language="ru-RU")
             
-        # 2. Если это кружок, вырезаем кадр из видео
         if is_video:
             cap = cv2.VideoCapture(ogg_path)
-            success, frame = cap.read() # Читаем первый кадр
+            success, frame = cap.read()
             if success:
-                cv2.imwrite(img_path, frame) # Сохраняем во временный джипег
+                cv2.imwrite(img_path, frame)
                 with open(img_path, "rb") as image_file:
                     b64_img = base64.b64encode(image_file.read()).decode('utf-8')
             cap.release()
-            
     except Exception as e:
         print(f"Ошибка обработки медиа: {e}")
     finally:
-        # Чистим мусор за собой
         for p in [ogg_path, wav_path, img_path]:
             if os.path.exists(p): os.remove(p)
         gc.collect()
-        
-    return text, b64_img
-
-# --- ЗАПРОС К OPENROUTER ---
+    return text, b64_img# --- ЗАПРОС К OPENROUTER ---
 def ask_gemini(chat_id, text_query, b64_img=None):
     if text_query and not b64_img:
         save_mem(chat_id, "user", text_query)
@@ -118,7 +109,6 @@ def ask_gemini(chat_id, text_query, b64_img=None):
         "messages": messages,
         "max_tokens": 1000
     }
-    
     try:
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=40).json()
         if 'choices' in res:
@@ -152,11 +142,9 @@ def handle_audio(m):
     file_id = m.video_note.file_id if is_video else m.voice.file_id
     
     bot.reply_to(m, "Зазырим кружок... 👀" if is_video else "Слушаю тебя, бро... 🎧")
-    
     text, b64_img = process_media(file_id, m.chat.id, is_video)
     
     if is_video:
-        # Если видос беззвучный или гугл не распознал речь
         speech_info = f"Ты сказал: \"{text}\"\n\n" if text else ""
         bot.reply_to(m, f"{speech_info}Анализирую кадр из кружка...")
         bot.reply_to(m, ask_gemini(m.chat.id, text, b64_img))
@@ -191,3 +179,4 @@ if __name__ == "__main__":
 
     print("Супер-Бот успешно запущен на чистом соединении!...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)
+
