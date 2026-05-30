@@ -197,6 +197,26 @@ async def main():
     # 1. Запускаем веб-сервер для Рендера
     await start_web_server()
     
+    # 2. Жестко чистим вебхуки и закрываем старые сессии
+    print("Чистим старые сессии и вебхуки...")
+    try:
+        await bot.delete_webhook(drop_pending_updates=True) # Игнорим старые апдейты, чтобы не захлебнуться
+        await bot.close_session() # Закрываем сессию, если она висела
+        await asyncio.sleep(2) # Даем Телеграму 2 секунды прийти в себя
+    except Exception as e:
+        print(f"Не удалось сбросить сессию: {e}")
+    
+    # 3. Запускаем бесконечный асинхронный пуллинг бота
+    print("Супер-Бот погнал!...")
+    await bot.infinity_polling(
+        timeout=20,
+        skip_pending=True,
+        allowed_updates=[]
+    )
+
+    # 1. Запускаем веб-сервер для Рендера
+    await start_web_server()
+    
     # 2. Чистим вебхуки перед стартом бота
     print("Чистим вебхуки...")
     try:
