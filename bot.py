@@ -97,8 +97,7 @@ async def download_media_async(file_id, chat_id, is_video=False):
     except Exception as e: 
         print(f"Медиа ошибка: {e}")
     finally:
-        for p in [ogg_path, wav_path, img_path]:
-            if os.path.exists(p): 
+        for p in [ogg_path, wav_path, img_path]:if os.path.exists(p): 
                 os.remove(p)
         gc.collect()
     return text, b64_img
@@ -195,7 +194,8 @@ async def main():
     
     print("Супер-Бот погнал!...")
     await bot.infinity_polling(
-        timeout=30,skip_pending=True,
+        timeout=30,
+        skip_pending=True,
         allowed_updates=[]
     )
 
