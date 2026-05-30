@@ -12,7 +12,10 @@ class SimpleHTTPServer(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.send_response(200); self.end_headers()
 
-Thread(target=lambda: HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), SimpleHTTPServer).serve_forever(), daemon=True).start()
+   port = int(os.environ.get("PORT", 8000))
+   server = HTTPServer(("0.0.0.0", port), SimpleHTTPServer)
+   Thread(target=server.serve_forever, daemon=True).start()
+
 
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
