@@ -5,3 +5,4 @@ pydub
 pymongo
 dnspython
 opencv-python-headless
+aiohttp
