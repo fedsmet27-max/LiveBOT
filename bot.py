@@ -9,28 +9,24 @@ import cv2
 import aiohttp
 from telebot.async_telebot import AsyncTeleBot
 from aiohttp import web
-from motor.motor_asyncio import AsyncIOMotorClient  # Асинхронный драйвер для MongoDB
+from motor.motor_asyncio import AsyncIOMotorClient
 
-# Токены и настройки
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
-MONGO_URI = os.environ.get('MONGO_URI')  # Твоя строка подключения к MongoDB
+MONGO_URI = os.environ.get('MONGO_URI')
 SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко. Обращайся к юзеру на 'ты', бро, родной, склоняй как по кайфу."
 
-# Инициализируем асинхронного бота
 bot = AsyncTeleBot(BOT_TOKEN)
 
-# Подключение к БД
 if MONGO_URI:
     db_client = AsyncIOMotorClient(MONGO_URI)
     db = db_client["aibro_bot_db"]
     history_collection = db["chat_history"]
-    print("====== Бесконечная база данных MongoDB успешно подключена! ======")
+    print("====== MongoDB подключена ======")
 else:
-    print("====== ВНИМАНИЕ: MONGO_URI не найден в Env! Бот работает БЕЗ памяти! ======")
+    print("====== MONGO_URI не найден ======")
     history_collection = None
 
-# --- АСИНХРОННЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 async def handle_ping(request):
     return web.Response(text="AI Bro в эфире, Render, не туши меня!")
 
@@ -44,7 +40,6 @@ async def start_web_server():
     await site.start()
     print(f"Фейк-сервер запущен на порту {port}")
 
-# --- БЕСКОНЕЧНАЯ ПАМЯТЬ ЧЕРЕЗ MONGODB ---
 async def save_mem_async(chat_id, role, content):
     if history_collection is not None:
         try:
@@ -55,17 +50,16 @@ async def save_mem_async(chat_id, role, content):
                 "timestamp": datetime.now()
             })
         except Exception as e:
-            print(f"Ошибка записи истории в Монгу: {e}")
+            print(f"Ошибка записи в БД: {e}")
 
 async def get_mem_async(chat_id):
     if history_collection is not None:
         try:
-            # Вытягиваем абсолютно всю историю этого чата, сортируя по времени
             cursor = history_collection.find({"chat_id": str(chat_id)}).sort("timestamp", 1)
-            results = await cursor.to_list(length=None)  # length=None означает без ограничений (бесконечно)
+            results = await cursor.to_list(length=None)
             return [{"role": r["role"], "content": r["content"]} for r in results]
         except Exception as e:
-            print(f"Ошибка чтения истории из Монги: {e}")
+            print(f"Ошибка чтения БД: {e}")
             return []
     return []
 
@@ -73,10 +67,10 @@ async def clear_mem_async(chat_id):
     if history_collection is not None:
         try:
             await history_collection.delete_many({"chat_id": str(chat_id)})
-            print(f"Память чата {chat_id} полностью очищена.")except Exception as e:
-            print(f"Ошибка очистки истории: {e}")
+            print(f"Память чата {chat_id} очищена.")
+        except Exception as e:
+            print(f"Ошибка очистки: {e}")
 
-# --- АСИНХРОННАЯ ОБРАБОТКА МЕДИА ---
 async def download_media_async(file_id, chat_id, is_video=False):
     ogg_path, wav_path, img_path = f"t_{chat_id}.ogg", f"t_{chat_id}.wav", f"t_{chat_id}.jpg"
     text, b64_img = "", None
@@ -109,19 +103,16 @@ async def download_media_async(file_id, chat_id, is_video=False):
         gc.collect()
     return text, b64_img
 
-# --- АСИНХРОННЫЙ ЗАПРОС К OPENROUTER (С БЕСКОНЕЧНОЙ ПАМЯТЬЮ) ---
 async def ask_gemini_async(chat_id, text_query, b64_img=None):
     if not text_query and not b64_img:
         return "Ты че молчишь, родной? Напиши че-нибудь!"
         
     if text_query and not b64_img:
-        # Сохраняем сообщение юзера в бесконечную базу
         await save_mem_async(chat_id, "user", text_query)
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     live_prompt = f"{SYSTEM_PROMPT}\n\n[Реальное время сервера: {current_time}. Всегда помни, что сейчас 2026 год!]"
     
-    # Достаем ВСЮ историю переписки с этим юзером из базы данных
     history = await get_mem_async(chat_id)
     
     headers = {
@@ -158,18 +149,14 @@ async def ask_gemini_async(chat_id, text_query, b64_img=None):
                     
                 ans = res_json['choices'][0]['message']['content']
                 if text_query and not b64_img:
-                    # Сохраняем ответ ИИ в бесконечную базу
                     await save_mem_async(chat_id, "assistant", ans)
                 return ans
     except Exception as e:
         print(f"Ошибка Gemini: {e}")
         return "Бля, родной, у меня мозги закипели, давай по новой..."
 
-# --- ОБРАБОТЧИКИ ТЕЛЕГРАМ-СОБЫТИЙ ---
-
 @bot.message_handler(commands=['start', 'reset', 'clear'])
 async def send_welcome(message):
-    # Теперь при этой команде память стирается именно в облачной БД
     await clear_mem_async(message.chat.id)
     await bot.reply_to(message, "Здорово, брат! Я всё забыл, давай общаться с чистого листа. Че расскажешь?")
 
@@ -180,7 +167,6 @@ async def handle_voice(message):
     if not text:
         await bot.reply_to(message, "Брат, я нихуя не разобрал в твоем голосовом. Напиши текстом или запиши почетче.")
         return
-    
     reply = await ask_gemini_async(message.chat.id, text)
     await bot.reply_to(message, reply)
 
@@ -188,7 +174,6 @@ async def handle_voice(message):
 async def handle_video_note(message):
     await bot.send_chat_action(message.chat.id, 'typing')
     text, b64_img = await download_media_async(message.video_note.file_id, message.chat.id, is_video=True)
-    
     reply = await ask_gemini_async(message.chat.id, text, b64_img)
     await bot.reply_to(message, reply)
 
@@ -198,12 +183,8 @@ async def handle_text(message):
     reply = await ask_gemini_async(message.chat.id, message.text)
     await bot.reply_to(message, reply)
 
-# --- ГЛАВНЫЙ АСИНХРОННЫЙ ЦИКЛ (БЕЗ КОНФЛИКТОВ 409) ---
 async def main():
-    # 1. Запускаем веб-сервер для Рендера
     await start_web_server()
-    
-    # 2. Чистим сессии и вебхуки, чтобы не ловить ошибку 409
     print("Чистим старые сессии и вебхуки...")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -212,11 +193,9 @@ async def main():
     except Exception as e:
         print(f"Сброс сессии: {e}")
     
-    # 3. Запуск бесконечного асинхронного пуллинга
     print("Супер-Бот погнал!...")
     await bot.infinity_polling(
-        timeout=30,
-        skip_pending=True,
+        timeout=30,skip_pending=True,
         allowed_updates=[]
     )
 
