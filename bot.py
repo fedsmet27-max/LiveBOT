@@ -153,7 +153,6 @@ def handle_photo(m):
         b64_img = base64.b64encode(img_data).decode('utf-8')
         bot.reply_to(m, ask_gemini(m.chat.id, m.caption if m.caption else "", b64_img))
     except: bot.reply_to(m, "Не смог открыть картинку, бро.")
-
 if __name__ == "__main__":
     print("Чистим вебхуки...")
     try:
@@ -161,4 +160,21 @@ if __name__ == "__main__":
         time.sleep(2)
     except Exception as e: print(f"Ошибка вебхука: {e}")
     print("Бот погнал!...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)
+    bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)if __name__ == "__main__":
+    print("Сносим все старые коннекты в Телеге...")
+    try:
+        # Удаляем вебхук принудительно
+        bot.remove_webhook()
+        time.sleep(1)
+    except Exception as e: 
+        print(f"Ошибка сброса вебхука: {e}")
+    
+    print("Супер-Бот погнал!...")
+    # Тут добавлен allowed_updates=[] — он заставляет Телеграм сбросить ВСЕ старые запросы обновлений
+    bot.infinity_polling(
+        timeout=20, 
+        long_polling_timeout=15, 
+        skip_pending=True, 
+        allowed_updates=[]
+    )
+
