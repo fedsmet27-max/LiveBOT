@@ -46,6 +46,7 @@ history_collection = db['chat_history']
 
 
 
+
 # Лимит контекста — 100 сообщений.
 CONTEXT_LIMIT = 100
 
