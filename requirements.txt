@@ -1,8 +1,7 @@
 pyTelegramBotAPI
-requests
+aiohttp
 SpeechRecognition
 pydub
-pymongo
-dnspython
 opencv-python-headless
-aiohttp
+motor
+dnspython
