@@ -5,21 +5,25 @@ import speech_recognition as sr
 from pydub import AudioSegment
 import cv2
 
+# Настройка заглушки-сервера для Render
 class SimpleHTTPServer(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200); self.end_headers()
+        self.send_response(200)
+        self.end_headers()
         self.wfile.write(b"AI Bro is alive!")
     def do_HEAD(self):
-        self.send_response(200); self.end_headers()
+        self.send_response(200)
+        self.end_headers()
 
-   port = int(os.environ.get("PORT", 8000))
-   server = HTTPServer(("0.0.0.0", port), SimpleHTTPServer)
-   Thread(target=server.serve_forever, daemon=True).start()
+# Запускаем сервер в фоне на старте
+port = int(os.environ.get("PORT", 8000))
+server = HTTPServer(("0.0.0.0", port), SimpleHTTPServer)
+Thread(target=server.serve_forever, daemon=True).start()
 
-
+# Конфиг
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 API_KEY = os.environ.get('OPENROUTER_API_KEY')
-SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко."
+SYSTEM_PROMPT = "Ты — AI Bro, дерзкий, харизматичный ИИ-кореш. Общайся на равных, юзай молодёжный сленг и матюки. Говори кратко, ёмко. Тебе доступен поиск в интернете в реальном времени, используй его для актуальных вопросов!"
 DB_FILE = "chat_history.json"
 LIMIT = 50
 
@@ -88,7 +92,12 @@ def ask_gemini(chat_id, text_query, b64_img=None):
         save_mem(chat_id, "user", text_query)
     
     history = get_mem(chat_id)
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {API_KEY}", 
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://render.com", # Для OpenRouter
+        "X-Title": "AI Bro Bot"
+    }
     
     if b64_img:
         user_content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]
@@ -100,83 +109,84 @@ def ask_gemini(chat_id, text_query, b64_img=None):
     else:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
-    data = {"model": "google/gemini-2.5-flash", "messages": messages, "max_tokens": 1000}
+    # Добавляем плагин web-search от OpenRouter, чтобы модель гуглила инфу на лету!
+    data = {
+        "model": "google/gemini-2.5-flash", 
+        "messages": messages, 
+        "max_tokens": 1000,
+        "plugins": [{"id": "web-search"}] # Фича для поиска в реальном времени через OpenRouter
+    }
+    
     try:
-        res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=40).json()
-        if 'choices' in res:
-            reply = res['choices'][0]['message']['content']
-            if not b64_img: save_mem(chat_id, "assistant", reply)
-            return reply
-        return "Бро, у меня на сервере косяк, проверь баланс OpenRouter!"
+        res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30)
+        res_json = res.json()
+        ans = res_json['choices'][0]['message']['content']
+        if text_query and not b64_img:
+            save_mem(chat_id, "assistant", ans)
+        return ans
     except Exception as e:
-        print(f"Ошибка ИИ: {e}"); return "Бля, бро, че-то мозги набекрень съехали..."
+        print(f"Ошибка Gemini: {e}")
+        return "Бля, бро, у меня чет мозги закипели от этого вопроса, давай по новой..."
 
+# Обработчики Telegram-бота
 @bot.message_handler(commands=['start'])
-def start(m):
-    bot.reply_to(m, "Здорово, бро! Я твой ИИ-кореш. Я вижу кружки, фотки, слышу ГС и всё помню! Очистить память: /clear.")
+def start_cmd(m):
+    clear_mem(m.chat.id)
+    bot.reply_to(m, "Здорово, бро! Я ИИ Бро — твой кореш на связи 24/7. Че как сам? Можешь отправлять текст, фотки, гс или кружочки!")
 
 @bot.message_handler(commands=['clear'])
-def clear(m):
+def clear_cmd(m):
     clear_mem(m.chat.id)
-    bot.reply_to(m, "Всё забыл, голова пустая, бро! 😉")
+    bot.reply_to(m, "Память чиста, бро! Начинаем с чистого листа.")
 
 @bot.message_handler(content_types=['text'])
 def handle_text(m):
-    if not m.text or m.text.strip() == "": return
-    bot.send_chat_action(m.chat.id, 'typing')
-    bot.reply_to(m, ask_gemini(m.chat.id, m.text))
+    ans = ask_gemini(m.chat.id, m.text)
+    bot.reply_to(m, ans)
 
-@bot.message_handler(content_types=['voice', 'video_note'])
-def handle_audio(m):
+@bot.message_handler(content_types=['voice'])
+def handle_voice(m):
     bot.send_chat_action(m.chat.id, 'typing')
-    is_video = m.content_type == 'video_note'
-    file_id = m.video_note.file_id if is_video else m.voice.file_id
-    
-    bot.reply_to(m, "Зазырим кружок... 👀" if is_video else "Слушаю тебя, бро... 🎧")
-    text, b64_img = process_media(file_id, m.chat.id, is_video)
-    
-    if is_video:
-        info = f"Ты сказал: \"{text}\"\n\nАнализирую кружок..." if text and text.strip() else "Ты записал кружок молча.\n\nАнализирую..."
-        bot.reply_to(m, info)
-        bot.reply_to(m, ask_gemini(m.chat.id, text, b64_img))
+    text, _ = process_media(m.voice.file_id, m.chat.id)
+    if text:
+        ans = ask_gemini(m.chat.id, text)
+        bot.reply_to(m, f"Ты сказал: \"{text}\"\n\n{ans}")
     else:
-        if not text or not text.strip():
-            bot.reply_to(m, "Бля, не разобрал ни слова в ГС. Попробуй сказать чётче.")
-            return
-        bot.reply_to(m, f"Ты сказал: \"{text}\"\n\nДумаю...")
-        bot.reply_to(m, ask_gemini(m.chat.id, text))
+        bot.reply_to(m, "Бро, че-то я не разобрал твой базар на гс. Повтори почетче.")
+
+@bot.message_handler(content_types=['video_note'])
+def handle_video_note(m):
+    bot.send_chat_action(m.chat.id, 'typing')
+    text, b64_img = process_media(m.video_note.file_id, m.chat.id, is_video=True)
+    ans = ask_gemini(m.chat.id, text, b64_img)
+    bot.reply_to(m, ans)
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(m):
     bot.send_chat_action(m.chat.id, 'typing')
-    bot.reply_to(m, "Опа, зазырим че там... 👀")
     try:
         file_info = bot.get_file(m.photo[-1].file_id)
         img_data = bot.download_file(file_info.file_path)
         b64_img = base64.b64encode(img_data).decode('utf-8')
-        bot.reply_to(m, ask_gemini(m.chat.id, m.caption if m.caption else "", b64_img))
-    except: bot.reply_to(m, "Не смог открыть картинку, бро.")
-        
+        ans = ask_gemini(m.chat.id, m.caption, b64_img)
+        bot.reply_to(m, ans)
+    except Exception as e:
+        print(e)
+        bot.reply_to(m, "Не смог открыть картинку, бро.")
 
-    except Exception as e: print(f"Ошибка вебхука: {e}")
+# Снос старых коннектов и запуск
+print("Сносим все старые коннекты в Телеге...")
+try:
+    bot.remove_webhook()
+    time.sleep(1)
+except Exception as e:
+    print(f"Ошибка сброса вебхука: {e}")
 
-    print("Сносим все старые коннекты в Телеге...")
-    try:
-        # Удаляем вебхук принудительно
-        bot.remove_webhook()
-        time.sleep(1)
-    except Exception as e: 
-        print(f"Ошибка сброса вебхука: {e}")
-        
-
-
-
+if __name__ == "__main__":
     print("Супер-Бот погнал!...")
-    # Тут добавлен allowed_updates=[] — он заставляет Телеграм сбросить ВСЕ старые запросы обновлений
     bot.infinity_polling(
-        timeout=20, 
-        long_polling_timeout=15, 
-        skip_pending=True, 
+        timeout=20,
+        long_polling_timeout=15,
+        skip_pending=True,
         allowed_updates=[]
     )
-
