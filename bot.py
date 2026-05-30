@@ -149,57 +149,6 @@ def ask_gemini(chat_id, text_query, b64_img=None):
         print(f"Ошибка Gemini: {e}")
         return "Бля, родной, у меня мозги закипели, давай по новой..."
 
-# --- АСИНХРОННЫЕ ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
-@bot.message_handler(commands=['start'])
-async def start_cmd(m):
-    clear_mem(m.chat.id)
-    await bot.reply_to(m, "Здорово, Федя! Я ИИ Бро — твой кореш на связи. Че как сам, родной? Пиши, шли гс, кружки или фотки — всё разберем!")
-
-@bot.message_handler(commands=['clear'])
-async def clear_cmd(m):
-    clear_mem(m.chat.id)
-    await bot.reply_to(m, "Память чиста, родной! Начинаем заново.")
-
-@bot.message_handler(content_types=['text'])
-async def handle_text(m):
-    # Запускаем тяжелый запрос к Gemini в отдельном потоке, чтобы не вешать асинхронный веб-сервер
-    loop = asyncio.get_event_loop()
-    ans = await loop.run_in_executor(None, ask_gemini, m.chat.id, m.text)
-    await bot.reply_to(m, ans)
-
-@bot.message_handler(content_types=['voice'])
-async def handle_voice(m):
-    await bot.send_chat_action(m.chat.id, 'typing')
-    text, _ = await download_media_async(m.voice.file_id, m.chat.id)
-    if text:
-        loop = asyncio.get_event_loop()
-        ans = await loop.run_in_executor(None, ask_gemini, m.chat.id, text)
-        await bot.reply_to(m, f"Ты сказал: \"{text}\"\n\n{ans}")
-    else:
-        await bot.reply_to(m, "Родной, не разобрал твой базар. Повтори почетче.")
-
-@bot.message_handler(content_types=['video_note'])
-async def handle_video_note(m):
-    await bot.send_chat_action(m.chat.id, 'typing')
-    text, b64_img = await download_media_async(m.video_note.file_id, m.chat.id, is_video=True)
-    loop = asyncio.get_event_loop()
-    ans = await loop.run_in_executor(None, ask_gemini, m.chat.id, text, b64_img)
-    await bot.reply_to(m, ans)
-
-@bot.message_handler(content_types=['photo'])
-async def handle_photo(m):
-    await bot.send_chat_action(m.chat.id, 'typing')
-    try:
-        file_info = await bot.get_file(m.photo[-1].file_id)
-        img_data = await bot.download_file(file_info.file_path)
-        b64_img = base64.b64encode(img_data).decode('utf-8')
-        loop = asyncio.get_event_loop()
-        ans = await loop.run_in_executor(None, ask_gemini, m.chat.id, m.caption, b64_img)
-        await bot.reply_to(m, ans)
-    except Exception as e:
-        print(e)
-        await bot.reply_to(m, "Не смог открыть картинку, брат.")
-
 # --- ГЛАВНЫЙ АСИНХРОННЫЙ ЦИКЛ ---
 async def main():
     # 1. Запускаем веб-сервер для Рендера
@@ -213,7 +162,7 @@ async def main():
     except:
         pass
     
-    # 3. Запускаем бесконечный асинхронный пуллинг бота параллельно с веб-сервером
+    # 3. Запускаем бесконечный асинхронный пуллинг бота
     print("Супер-Бот погнал!...")
     await bot.infinity_polling(
         timeout=20,
