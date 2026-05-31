@@ -48,10 +48,10 @@ async def save_mem_async(chat_id, role, content):
                 "role": role,
                 "content": content,
                 "timestamp": datetime.now()
+           
             })
         except Exception as e:
             print(f"Ошибка записи в БД: {e}")
-
 async def get_mem_async(chat_id):
     if history_collection is not None:
         try:
@@ -62,6 +62,7 @@ async def get_mem_async(chat_id):
             print(f"Ошибка чтения БД: {e}")
             return []
     return []
+
 
 async def clear_mem_async(chat_id):
     if history_collection is not None:
